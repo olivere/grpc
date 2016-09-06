@@ -14,13 +14,3 @@ based on a static list of addresses.
 
 MIT-LICENSE. See [LICENSE](http://olivere.mit-license.org/)
 or the LICENSE file provided in the repository for details.
-
-
-This package implements gRPC load-balancing as described
-in [this document](https://github.com/grpc/grpc/blob/master/doc/load-balancing.md).
-
-It has two `Resolver` implementations:
-* [StaticResolver]()
-* [ConsulResolver]()
-
-Here's an example of setting up a Consul-based resolver for a gRPC client:
