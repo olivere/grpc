@@ -4,8 +4,8 @@ This package implements gRPC load-balancing as described
 in [this document](https://github.com/grpc/grpc/blob/master/doc/load-balancing.md).
 
 It has two `Resolver` implementations:
-* [StaticResolver]()
-* [ConsulResolver]()
+* [StaticResolver](https://github.com/olivere/grpc/blob/master/lb/static.go)
+* [ConsulResolver](https://github.com/olivere/grpc/blob/master/lb/consul.go)
 
 Here's an example of setting up a Consul-based resolver for a gRPC client:
 
@@ -21,8 +21,11 @@ func main() {
 		log.Fatal(err)
 	}
 
-  // Create a resolver for the "messenger-service"
-	r := lb.NewConsulResolver(cli, "messenger-service", "", false)
+  // Create a resolver for the "echo" service
+	r, err := lb.NewConsulResolver(cli, "echo", "")
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// Setup a gRPC client connection
 	var opts []grpc.DialOption
@@ -36,10 +39,10 @@ func main() {
 	defer conn.Close()
 
 	// Every call to conn will get load-balanced between the servers
-	// found for the "messenger-service" in Consul, e.g.:
+	// found for the "echo" service in Consul, e.g.:
 	for i := 0; i < 100; i++ {
 		ctx := context.Background()
-		res, err := client.Send(ctx, &pb.SendRequest{Message: "Hello"})
+		res, err := client.Echo(ctx, &pb.EchoRequest{Message: "Hello"})
 		if err != nil {
 			log.Fatal(err)
 		}
