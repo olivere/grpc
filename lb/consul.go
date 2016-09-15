@@ -5,6 +5,7 @@
 package lb
 
 import (
+	"log"
 	"net"
 	"strconv"
 
@@ -60,8 +61,11 @@ func (r *ConsulResolver) Resolve(target string) (naming.Watcher, error) {
 }
 
 // Next blocks until an update or error happens. It may return one or more
-// updates. The first call will return the full set of results. An error is
-// returned if and only if the watcher cannot recover.
+// updates. The first call will return the full set of instances available
+// as NewConsulResolver will look those up. Subsequent calls to Next() will
+// block until the resolver finds any new or removed instance.
+//
+// An error is returned if and only if the watcher cannot recover.
 func (r *ConsulResolver) Next() ([]*naming.Update, error) {
 	return <-r.updatesc, nil
 }
@@ -92,7 +96,7 @@ func (r *ConsulResolver) updater(instances []string, lastIndex uint64) {
 		default:
 			newInstances, lastIndex, err = r.getInstances(lastIndex)
 			if err != nil {
-				panic(err)
+				log.Printf("grpc/lb: error retrieving instances from Consul: %v", err)
 				continue
 			}
 			r.updatesc <- r.makeUpdates(oldInstances, newInstances)
