@@ -44,9 +44,12 @@ func NewConsulResolver(client *api.Client, service, tag string) (*ConsulResolver
 	// Retrieve instances immediately
 	instances, index, err := r.getInstances(0)
 	if err != nil {
-		return nil, err
+		log.Printf("grpc/lb: error retrieving instances from Consul: %v", err)
 	}
-	r.updatesc <- r.makeUpdates(nil, instances)
+	updates := r.makeUpdates(nil, instances)
+	if len(updates) > 0 {
+		r.updatesc <- updates
+	}
 
 	// Start updater
 	go r.updater(instances, index)
@@ -99,7 +102,10 @@ func (r *ConsulResolver) updater(instances []string, lastIndex uint64) {
 				log.Printf("grpc/lb: error retrieving instances from Consul: %v", err)
 				continue
 			}
-			r.updatesc <- r.makeUpdates(oldInstances, newInstances)
+			updates := r.makeUpdates(oldInstances, newInstances)
+			if len(updates) > 0 {
+				r.updatesc <- updates
+			}
 			oldInstances = newInstances
 		}
 	}
