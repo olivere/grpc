@@ -43,6 +43,13 @@ func (m *EchoRequest) String() string            { return proto.CompactTextStrin
 func (*EchoRequest) ProtoMessage()               {}
 func (*EchoRequest) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{0} }
 
+func (m *EchoRequest) GetMessage() string {
+	if m != nil {
+		return m.Message
+	}
+	return ""
+}
+
 type EchoResponse struct {
 	Message string `protobuf:"bytes,2,opt,name=message" json:"message,omitempty"`
 }
@@ -51,6 +58,13 @@ func (m *EchoResponse) Reset()                    { *m = EchoResponse{} }
 func (m *EchoResponse) String() string            { return proto.CompactTextString(m) }
 func (*EchoResponse) ProtoMessage()               {}
 func (*EchoResponse) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{1} }
+
+func (m *EchoResponse) GetMessage() string {
+	if m != nil {
+		return m.Message
+	}
+	return ""
+}
 
 func init() {
 	proto.RegisterType((*EchoRequest)(nil), "echo.EchoRequest")
@@ -63,7 +77,7 @@ var _ grpc.ClientConn
 
 // This is a compile-time assertion to ensure that this generated file
 // is compatible with the grpc package it is being compiled against.
-const _ = grpc.SupportPackageIsVersion3
+const _ = grpc.SupportPackageIsVersion4
 
 // Client API for Echo service
 
@@ -126,7 +140,7 @@ var _Echo_serviceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: fileDescriptor0,
+	Metadata: "proto/echo/echo.proto",
 }
 
 func init() { proto.RegisterFile("proto/echo/echo.proto", fileDescriptor0) }
