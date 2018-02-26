@@ -14,7 +14,7 @@ import (
 )
 
 // NewStreamDemux initializes and returns a new StreamDemux
-func NewStreamDemux(c *api.Client) *StreamDemux {
+func NewStreamDemux(c *api.Client, timeout time.Duration) *StreamDemux {
 	sd := &StreamDemux{
 		c:        c,
 		services: make(map[string]*instanceChannels),
@@ -22,7 +22,7 @@ func NewStreamDemux(c *api.Client) *StreamDemux {
 	go func() {
 		for {
 			sd.getInstances()
-			time.Sleep(time.Minute * 5)
+			time.Sleep(timeout)
 		}
 	}()
 
