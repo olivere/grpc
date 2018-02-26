@@ -5,7 +5,6 @@
 package consul
 
 import (
-	"fmt"
 	"net"
 	"strconv"
 	"time"
@@ -18,33 +17,35 @@ import (
 func NewStreamDemux(c *api.Client) *StreamDemux {
 	sd := &StreamDemux{
 		c:        c,
-		services: make(map[string][](chan []string)),
+		services: make(map[string]*instanceChannels),
 	}
 	go func() {
 		for {
-			time.Sleep(time.Second * 5)
-			sd.getInstances(0)
+			sd.getInstances()
+			time.Sleep(time.Minute * 5)
 		}
 	}()
 
 	return sd
 }
 
+type instanceChannels struct {
+	lastIndex uint64
+	channels  [](chan []string)
+}
+
 // StreamDemux provides the list of list of available serves via a Consul backend.
 type StreamDemux struct {
 	c        *api.Client
-	services map[string][](chan []string)
+	services map[string]*instanceChannels
 }
 
 // getInstances retrieves all instances of the services registered in Consul.
-func (sd StreamDemux) getInstances(lastIndex uint64) {
-	fmt.Println("ok papa get some consul instances")
-
-	var addresses []string
-
-	for s, scs := range sd.services {
-		services, _, _ := sd.c.Health().Service(s, "", true, &api.QueryOptions{
-			WaitIndex: lastIndex,
+func (sd StreamDemux) getInstances() {
+	for s, ic := range sd.services {
+		var addresses []string
+		services, meta, _ := sd.c.Health().Service(s, "", true, &api.QueryOptions{
+			WaitIndex: ic.lastIndex,
 		})
 
 		for _, service := range services {
@@ -55,17 +56,25 @@ func (sd StreamDemux) getInstances(lastIndex uint64) {
 			addr := net.JoinHostPort(s, strconv.Itoa(service.Service.Port))
 			addresses = append(addresses, addr)
 		}
-		fmt.Printf("%s: %v \n", s, addresses)
-		for _, sc := range scs {
-			sc <- addresses
+		for _, c := range ic.channels {
+			c <- addresses
 		}
+		ic.lastIndex = meta.LastIndex
 	}
 }
 
 // NewResolver initializes and returns a new Resolver.
 func (sd StreamDemux) NewResolver(service, tag string) (*Resolver, error) {
 	resolverSc := make(chan []string)
-	sd.services[service] = append(sd.services[service], resolverSc)
+	if _, exists := sd.services[service]; !exists {
+		ic := &instanceChannels{
+			lastIndex: 0,
+			channels:  nil,
+		}
+		sd.services[service] = ic
+	}
+	sd.services[service].channels = append(sd.services[service].channels, resolverSc)
+
 	r := &Resolver{
 		service:   service,
 		tag:       tag,
@@ -97,7 +106,6 @@ type Resolver struct {
 // Resolve creates a watcher for target. The watcher interface is implemented
 // by Resolver as well, see Next and Close.
 func (r *Resolver) Resolve(target string) (naming.Watcher, error) {
-	fmt.Println("target", target)
 	return r, nil
 }
 
@@ -109,9 +117,6 @@ func (r *Resolver) Resolve(target string) (naming.Watcher, error) {
 // An error is returned if and only if the watcher cannot recover.
 func (r *Resolver) Next() ([]*naming.Update, error) {
 	nextUpdate := <-r.updatesc
-	for _, v := range nextUpdate {
-		fmt.Printf("%v \n", v)
-	}
 	return nextUpdate, nil
 }
 
@@ -129,7 +134,6 @@ func (r *Resolver) Close() {
 // instances and turns it into an array of naming.Updates.
 func (r *Resolver) makeUpdates() {
 	for newInstances := range r.servicesc {
-		fmt.Printf("newInstances: %v \n", newInstances)
 		oldAddr := make(map[string]struct{}, len(r.instances))
 		for _, instance := range r.instances {
 			oldAddr[instance] = struct{}{}
