@@ -5,56 +5,102 @@
 package consul
 
 import (
-	"log"
 	"net"
 	"strconv"
+	"time"
 
 	"github.com/hashicorp/consul/api"
 	"google.golang.org/grpc/naming"
 )
+
+// NewStreamDemux initializes and returns a new StreamDemux
+func NewStreamDemux(c *api.Client, timeout time.Duration) *StreamDemux {
+	sd := &StreamDemux{
+		c:        c,
+		services: make(map[string]*instanceChannels),
+	}
+	go func() {
+		for {
+			sd.getInstances()
+			time.Sleep(timeout)
+		}
+	}()
+
+	return sd
+}
+
+type instanceChannels struct {
+	lastIndex uint64
+	channels  [](chan []string)
+}
+
+// StreamDemux provides the list of list of available serves via a Consul backend.
+type StreamDemux struct {
+	c        *api.Client
+	services map[string]*instanceChannels
+}
+
+// getInstances retrieves all instances of the services registered in Consul.
+func (sd StreamDemux) getInstances() {
+	for s, ic := range sd.services {
+		var addresses []string
+		services, meta, _ := sd.c.Health().Service(s, "", true, &api.QueryOptions{
+			WaitIndex: ic.lastIndex,
+		})
+
+		for _, service := range services {
+			s := service.Service.Address
+			if len(s) == 0 {
+				s = service.Node.Address
+			}
+			addr := net.JoinHostPort(s, strconv.Itoa(service.Service.Port))
+			addresses = append(addresses, addr)
+		}
+		for _, c := range ic.channels {
+			c <- addresses
+		}
+		ic.lastIndex = meta.LastIndex
+	}
+}
+
+// NewResolver initializes and returns a new Resolver.
+func (sd StreamDemux) NewResolver(service, tag string) (*Resolver, error) {
+	resolverSc := make(chan []string)
+	if _, exists := sd.services[service]; !exists {
+		ic := &instanceChannels{
+			lastIndex: 0,
+			channels:  nil,
+		}
+		sd.services[service] = ic
+	}
+	sd.services[service].channels = append(sd.services[service].channels, resolverSc)
+
+	r := &Resolver{
+		service:   service,
+		tag:       tag,
+		instances: nil,
+		servicesc: resolverSc,
+		quitc:     make(chan struct{}),
+		updatesc:  make(chan []*naming.Update, 1),
+	}
+
+	go r.makeUpdates()
+
+	return r, nil
+}
 
 // Resolver implements the gRPC Resolver interface using a Consul backend.
 //
 // See the gRPC load balancing documentation for details about Balancer and
 // Resolver: https://github.com/grpc/grpc/blob/master/doc/load-balancing.md.
 type Resolver struct {
-	c           *api.Client
-	service     string
-	tag         string
-	passingOnly bool
+	service   string
+	tag       string
+	instances []string
 
-	quitc    chan struct{}
-	updatesc chan []*naming.Update
-}
-
-// NewResolver initializes and returns a new Resolver.
-//
-// It resolves addresses for gRPC connections to the given service and tag.
-// If the tag is irrelevant, use an empty string.
-func NewResolver(client *api.Client, service, tag string) (*Resolver, error) {
-	r := &Resolver{
-		c:           client,
-		service:     service,
-		tag:         tag,
-		passingOnly: true,
-		quitc:       make(chan struct{}),
-		updatesc:    make(chan []*naming.Update, 1),
-	}
-
-	// Retrieve instances immediately
-	instances, index, err := r.getInstances(0)
-	if err != nil {
-		log.Printf("grpc/lb/consul: error retrieving instances from Consul: %v", err)
-	}
-	updates := r.makeUpdates(nil, instances)
-	if len(updates) > 0 {
-		r.updatesc <- updates
-	}
-
-	// Start updater
-	go r.updater(instances, index)
-
-	return r, nil
+	servicesc chan []string
+	quitc     chan struct{}
+	updatesc  chan []*naming.Update
 }
 
 // Resolve creates a watcher for target. The watcher interface is implemented
@@ -70,7 +116,8 @@ func (r *Resolver) Resolve(target string) (naming.Watcher, error) {
 //
 // An error is returned if and only if the watcher cannot recover.
 func (r *Resolver) Next() ([]*naming.Update, error) {
-	return <-r.updatesc, nil
+	nextUpdate := <-r.updatesc
+	return nextUpdate, nil
 }
 
 // Close closes the watcher.
@@ -83,79 +130,34 @@ func (r *Resolver) Close() {
 	}
 }
 
-// updater is a background process started in NewResolver. It takes
-// a list of previously resolved instances (in the format of host:port, e.g.
-// 192.168.0.1:1234) and the last index returned from Consul.
-func (r *Resolver) updater(instances []string, lastIndex uint64) {
-	var err error
-	var oldInstances = instances
-	var newInstances []string
-
-	// TODO Cache the updates for a while, so that we don't overwhelm Consul.
-	for {
-		select {
-		case <-r.quitc:
-			break
-		default:
-			newInstances, lastIndex, err = r.getInstances(lastIndex)
-			if err != nil {
-				log.Printf("grpc/lb/consul: error retrieving instances from Consul: %v", err)
-				continue
-			}
-			updates := r.makeUpdates(oldInstances, newInstances)
-			if len(updates) > 0 {
-				r.updatesc <- updates
-			}
-			oldInstances = newInstances
-		}
-	}
-}
-
-// getInstances retrieves the new set of instances registered for the
-// service from Consul.
-func (r *Resolver) getInstances(lastIndex uint64) ([]string, uint64, error) {
-	services, meta, err := r.c.Health().Service(r.service, r.tag, r.passingOnly, &api.QueryOptions{
-		WaitIndex: lastIndex,
-	})
-	if err != nil {
-		return nil, lastIndex, err
-	}
-
-	var instances []string
-	for _, service := range services {
-		s := service.Service.Address
-		if len(s) == 0 {
-			s = service.Node.Address
-		}
-		addr := net.JoinHostPort(s, strconv.Itoa(service.Service.Port))
-		instances = append(instances, addr)
-	}
-	return instances, meta.LastIndex, nil
-}
-
 // makeUpdates calculates the difference between and old and a new set of
 // instances and turns it into an array of naming.Updates.
-func (r *Resolver) makeUpdates(oldInstances, newInstances []string) []*naming.Update {
-	oldAddr := make(map[string]struct{}, len(oldInstances))
-	for _, instance := range oldInstances {
-		oldAddr[instance] = struct{}{}
-	}
-	newAddr := make(map[string]struct{}, len(newInstances))
-	for _, instance := range newInstances {
-		newAddr[instance] = struct{}{}
-	}
-
-	var updates []*naming.Update
-	for addr := range newAddr {
-		if _, ok := oldAddr[addr]; !ok {
-			updates = append(updates, &naming.Update{Op: naming.Add, Addr: addr})
+func (r *Resolver) makeUpdates() {
+	for newInstances := range r.servicesc {
+		oldAddr := make(map[string]struct{}, len(r.instances))
+		for _, instance := range r.instances {
+			oldAddr[instance] = struct{}{}
 		}
-	}
-	for addr := range oldAddr {
-		if _, ok := newAddr[addr]; !ok {
-			updates = append(updates, &naming.Update{Op: naming.Delete, Addr: addr})
+		newAddr := make(map[string]struct{}, len(newInstances))
+		for _, instance := range newInstances {
+			newAddr[instance] = struct{}{}
 		}
-	}
 
-	return updates
+		var updates []*naming.Update
+		for addr := range newAddr {
+			if _, ok := oldAddr[addr]; !ok {
+				updates = append(updates, &naming.Update{Op: naming.Add, Addr: addr})
+			}
+		}
+		for addr := range oldAddr {
+			if _, ok := newAddr[addr]; !ok {
+				updates = append(updates, &naming.Update{Op: naming.Delete, Addr: addr})
+			}
+		}
+
+		if len(updates) > 0 {
+			r.updatesc <- updates
+		}
+		r.instances = newInstances
+	}
 }
