@@ -28,7 +28,6 @@ func TestResolver(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// srv.AddService("service", structs.HealthPassing, []string{"production"})
 	err = client.Agent().ServiceRegister(&api.AgentServiceRegistration{
 		ID:      "service-1",
 		Name:    "service",
