@@ -4,9 +4,9 @@ This package implements gRPC load-balancing as described
 in [this document](https://github.com/grpc/grpc/blob/master/doc/load-balancing.md).
 
 It has these `Resolver` implementations:
-* [StaticResolver](https://github.com/olivere/grpc/blob/master/lb/static.go)
-* [HealthzResolver](https://github.com/olivere/grpc/blob/master/lb/healthz.go)
-* [ConsulResolver](https://github.com/olivere/grpc/blob/master/lb/consul.go)
+* [StaticResolver](static/static.go)
+* [HealthzResolver](static/static.go)
+* [ConsulResolver](static/static.go)
 
 Here's an example of setting up a Consul-based resolver for a gRPC client:
 
@@ -22,7 +22,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-  // Create a resolver for the "echo" service
+  	// Create a resolver for the "echo" service
 	r, err := lb.NewConsulResolver(cli, "echo", "")
 	if err != nil {
 		log.Fatal(err)
@@ -32,7 +32,7 @@ func main() {
 	var opts []grpc.DialOption
 	opts = append(opts, grpc.WithBalancer(grpc.RoundRobin(r)))
 
-  // Notice you can use a blank address here
+  	// Notice you can use a blank address here
 	conn, err := grpc.Dial("", opts...)
 	if err != nil {
 		log.Fatal(err)
@@ -51,7 +51,6 @@ func main() {
 		time.Sleep(1*time.Second)
 	}
 }
-
 ```
 
 You don't need to do anything for the gRPC server-side (except registering
