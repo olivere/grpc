@@ -4,9 +4,9 @@ This package implements gRPC load-balancing as described
 in [this document](https://github.com/grpc/grpc/blob/master/doc/load-balancing.md).
 
 It has these `Resolver` implementations:
-* [StaticResolver](https://github.com/olivere/grpc/blob/master/lb/static/static.go)
-* [HealthzResolver](https://github.com/olivere/grpc/blob/master/lb/healthz/healthz.go)
-* [ConsulResolver](https://github.com/olivere/grpc/blob/master/lb/consul/consul.go)
+* [StaticResolver](static/static.go)
+* [HealthzResolver](static/static.go)
+* [ConsulResolver](static/static.go)
 
 Here's an example of setting up a Consul-based resolver for a gRPC client:
 
